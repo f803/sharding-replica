@@ -1,10 +1,220 @@
 x-postgres-common:
   &postgres-common
   image: postgres:17.2-alpine
-  user: postgres
   restart: always
 
 services:
+  main_pg: 
+    <<: *postgres-common
+    environment:
+      POSTGRES_USER: db
+      POSTGRES_DB: db
+      POSTGRES_PASSWORD: db
+      POSTGRES_HOST_AUTH_METHOD: "trust\nhost replication all 172.18.0.10/16 trust"
+      POSTGRES_INITDB_ARGS: "--auth-host=trust"
+    container_name: main
+    networks:
+    - adminer
+    command: |
+      postgres 
+      -c wal_level=replica 
+      -c hot_standby=on 
+      -c max_wal_senders=10
+      -c max_replication_slots=10 
+      -c hot_standby_feedback=on
+    volumes:
+      - ./testdata.sql:/docker-entrypoint-initdb.d/testdata.sql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports: 
+      - "5432:5432"
+    depends_on:
+      - RU_pg_shard
+      - EU_pg_shard
+      - WW_pg_shard
+
+  main_pg_replica:
+    <<: *postgres-common
+    ports:
+      - "5432"
+    container_name: main_pg_replica
+    networks:
+      adminer:
+        ipv4_address: 172.18.0.10
+    user: postgres
+    environment:
+      POSTGRES_USER: db
+      POSTGRES_PASSWORD: db
+      PGUSER: replicator
+      PGPASSWORD: replication
+    command: |
+      bash -c "
+      until pg_basebackup --pgdata=/var/lib/postgresql/data -R --slot=replication_slot --host=main --port=5432
+      do
+      echo 'Waiting for primary to connect...'
+      sleep 1s
+      done
+      echo 'Backup done, starting replica...'
+      chmod 0700 /var/lib/postgresql/data
+      postgres
+      "
+    depends_on:
+      - main_pg
+
+  RU_pg_replica:
+    <<: *postgres-common
+    ports:
+      - "5432"
+    container_name: RU_pg_replica
+    networks:
+      adminer:
+        ipv4_address: 172.18.0.11
+    user: postgres
+    environment:
+      POSTGRES_USER: db
+      POSTGRES_PASSWORD: db
+      PGUSER: replicator
+      PGPASSWORD: replication
+    command: |
+      bash -c "
+      until pg_basebackup --pgdata=/var/lib/postgresql/data -R --slot=replication_slot --host=RU_shard --port=5432
+      do
+      echo 'Waiting for primary to connect...'
+      sleep 1s
+      done
+      echo 'Backup done, starting replica...'
+      chmod 0700 /var/lib/postgresql/data
+      postgres
+      "
+    depends_on:
+      - RU_pg_shard
+
+
+  EU_pg_replica:
+    <<: *postgres-common
+    networks:
+      adminer:
+        ipv4_address: 172.18.0.12
+    container_name: EU_pg_replica
+    user: postgres
+    environment:
+      POSTGRES_USER: db
+      POSTGRES_PASSWORD: db
+      PGUSER: replicator
+      PGPASSWORD: replication
+    command: |
+      bash -c "
+      until pg_basebackup --pgdata=/var/lib/postgresql/data -R --slot=replication_slot --host=EU_shard --port=5432
+      do
+      echo 'Waiting for primary to connect...'
+      sleep 1s
+      done
+      echo 'Backup done, starting replica...'
+      chmod 0700 /var/lib/postgresql/data
+      postgres
+      "
+    depends_on:
+      - EU_pg_shard
+
+
+  WW_pg_replica:
+    <<: *postgres-common
+    ports:
+      - "5432"
+    container_name: WW_pg_replica
+    networks:
+      adminer:
+        ipv4_address: 172.18.0.13
+    user: postgres
+    environment:
+      POSTGRES_USER: db
+      POSTGRES_PASSWORD: db
+      PGUSER: replicator
+      PGPASSWORD: replication
+    command: |
+      bash -c "
+      until pg_basebackup --pgdata=/var/lib/postgresql/data -R --slot=replication_slot --host=WW_shard --port=5432
+      do
+      echo 'Waiting for primary to connect...'
+      sleep 1s
+      done
+      echo 'Backup done, starting replica...'
+      chmod 0700 /var/lib/postgresql/data
+      postgres
+      "
+    depends_on:
+      - WW_pg_shard
+
+
+  RU_pg_shard: 
+    <<: *postgres-common
+    environment:
+      POSTGRES_USER: db
+      POSTGRES_DB: db
+      POSTGRES_PASSWORD: db
+      POSTGRES_HOST_AUTH_METHOD: "trust\nhost replication all 172.18.0.11/16 trust"
+      POSTGRES_INITDB_ARGS: "--auth-host=trust"
+    container_name: RU_shard
+    networks:
+    - adminer
+    command: |
+      postgres 
+      -c wal_level=replica 
+      -c hot_standby=on 
+      -c max_wal_senders=10
+      -c max_replication_slots=10 
+      -c hot_standby_feedback=on
+    volumes:
+      - ./init-shard1.sql:/docker-entrypoint-initdb.d/init.sql
+    expose:
+      - "5432"
+
+
+  EU_pg_shard: 
+    <<: *postgres-common
+    environment:
+      POSTGRES_USER: db
+      POSTGRES_DB: db
+      POSTGRES_PASSWORD: db
+      POSTGRES_HOST_AUTH_METHOD: "trust\nhost replication all 172.18.0.12/16 trust"
+      POSTGRES_INITDB_ARGS: "--auth-host=trust"
+    container_name: EU_shard
+    networks:
+      - adminer
+    command: |
+      postgres 
+      -c wal_level=replica 
+      -c hot_standby=on 
+      -c max_wal_senders=10
+      -c max_replication_slots=10 
+      -c hot_standby_feedback=on
+    volumes:
+      - ./init-shard2.sql:/docker-entrypoint-initdb.d/init.sql
+    expose:
+      - "5432"
+
+
+  WW_pg_shard: 
+    <<: *postgres-common
+    environment:
+      POSTGRES_USER: db
+      POSTGRES_DB: db
+      POSTGRES_PASSWORD: db
+      POSTGRES_HOST_AUTH_METHOD: "trust\nhost replication all 172.18.0.13/16 trust"
+      POSTGRES_INITDB_ARGS: "--auth-host=trust"
+    container_name: WW_shard
+    networks:
+      - adminer 
+    command: |
+      postgres 
+      -c wal_level=replica 
+      -c hot_standby=on 
+      -c max_wal_senders=10
+      -c max_replication_slots=10 
+      -c hot_standby_feedback=on
+    volumes:
+      - ./init-shard3.sql:/docker-entrypoint-initdb.d/init.sql
+    expose:
+      - "5432"
 
   adminer:
     container_name: adminer
@@ -15,52 +225,9 @@ services:
     networks:
       - adminer
 
-  postgres_primary:
-    <<: *postgres-common
-    ports:
-      - 5432:5432
-    container_name: pg_primary
-    environment:
-      POSTGRES_USER: user
-      POSTGRES_DB: postgres
-      POSTGRES_PASSWORD: password
-      POSTGRES_HOST_AUTH_METHOD: "trust\nhost replication all 0.0.0.0/0 trust"
-      POSTGRES_INITDB_ARGS: "--auth-host=trust"
-    command: |
-      postgres 
-      -c wal_level=replica 
-      -c hot_standby=on 
-      -c max_wal_senders=10
-      -c max_replication_slots=10 
-      -c hot_standby_feedback=on
-    volumes:
-      - ./00_init.sql:/docker-entrypoint-initdb.d/00_init.sql
-    networks:
-      - adminer
-
-  postgres_replica:
-    <<: *postgres-common
-    ports:
-      - 5433:5432
-    container_name: pg_replica
-    environment:
-      PGUSER: replicator
-      PGPASSWORD: replicator_password
-    command: |
-      bash -c "
-      until pg_basebackup --pgdata=/var/lib/postgresql/data -R --slot=replication_slot --host=postgres_primary --port=5432
-      do
-      echo 'Waiting for primary to connect...'
-      sleep 1s
-      done
-      echo 'Backup done, starting replica...'
-      chmod 0700 /var/lib/postgresql/data
-      postgres
-      "
-    depends_on:
-      - postgres_primary
-    networks:
-      - adminer
-
 networks:
   adminer:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: "172.18.0.0/16"
