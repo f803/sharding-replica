@@ -10,6 +10,8 @@ DB_PASS=
 
 PG_USER=
 PG_PASSWORD=
+
+и выполнить
 `
 make up
 `
